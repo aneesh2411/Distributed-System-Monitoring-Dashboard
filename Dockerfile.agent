@@ -1,0 +1,21 @@
+# Use Python 3.9 slim image
+FROM python:3.9-slim
+
+# Set working directory
+WORKDIR /app
+
+# Copy requirements first to leverage Docker cache
+COPY requirements.txt .
+
+# Install dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy the rest of the application
+COPY . .
+
+# Environment variables can be overridden at runtime
+ENV DASHBOARD_URL=http://dashboard:5000
+ENV SERVER_NAME=default-server
+
+# Command to run the agent
+CMD ["python", "agents/system_metrics_agent.py"] 

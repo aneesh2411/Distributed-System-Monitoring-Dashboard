@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Monitoring Dashboard</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .metric-card {
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+        .metric-value {
+            font-size: 2.5em;
+            font-weight: bold;
+        }
+        .critical {
+            color: #dc3545;
+        }
+        .warning {
+            color: #ffc107;
+        }
+        .normal {
+            color: #198754;
+        }
+        #error-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 1000;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <div id="error-container"></div>
+    <div class="container mt-4">
+        <h1 class="mb-4">System Monitoring Dashboard</h1>
+        
+        <div id="servers-container">
+            <!-- Server sections will be dynamically added here -->
+        </div>
+    </div>
+
+    <!-- Server template -->
+    <template id="server-template">
+        <div class="server-section mb-5">
+            <h2 class="server-name mb-3"></h2>
+            <div class="row">
+                <div class="col-md-4">
+                    <div class="metric-card bg-white">
+                        <h3>CPU Usage</h3>
+                        <div class="metric-value cpu-usage">-%</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="metric-card bg-white">
+                        <h3>Memory Usage</h3>
+                        <div class="metric-value memory-usage">-%</div>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="metric-card bg-white">
+                        <h3>Disk Usage</h3>
+                        <div class="metric-value disk-usage">-%</div>
+                    </div>
+                </div>
+            </div>
+            <div class="chart-container mt-4" style="height: 300px;">
+                <canvas class="metrics-chart"></canvas>
+            </div>
+        </div>
+    </template>
+
+    <script>
+        const serverCharts = new Map();
+
+        function showError(message) {
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'alert alert-danger alert-dismissible fade show';
+            errorDiv.innerHTML = `
+                ${message}
+                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+            `;
+            document.getElementById('error-container').appendChild(errorDiv);
+            setTimeout(() => errorDiv.remove(), 5000);
+        }
+
+        function getColorClass(value) {
+            if (value >= 80) return 'critical';
+            if (value >= 60) return 'warning';
+            return 'normal';
+        }
+
+        function destroyChart(serverId) {
+            const serverInfo = serverCharts.get(serverId);
+            if (serverInfo && serverInfo.chart) {
+                serverInfo.chart.destroy();
+            }
+        }
+
+        function createServerSection(serverId, serverInfo) {
+            console.log('Creating server section for:', serverId, serverInfo);
+
+            // Clean up existing chart if it exists
+            destroyChart(serverId);
+
+            // Remove existing section if it exists
+            const existingSection = document.querySelector(`[data-server-id="${serverId}"]`);
+            if (existingSection) {
+                existingSection.remove();
+            }
+
+            const template = document.getElementById('server-template');
+            const serverSection = template.content.cloneNode(true);
+            
+            // Add server ID to the section
+            const section = serverSection.querySelector('.server-section');
+            section.setAttribute('data-server-id', serverId);
+            
+            // Set server name
+            serverSection.querySelector('.server-name').textContent = 
+                `${serverInfo.hostname} (${serverInfo.ip})`;
+            
+            // Add server section to container
+            const container = document.getElementById('servers-container');
+            container.appendChild(serverSection);
+
+            // Initialize chart
+            const chartCanvas = container.querySelector(`[data-server-id="${serverId}"] .metrics-chart`);
+            const chart = new Chart(chartCanvas, {
+                type: 'line',
+                data: {
+                    labels: [],
+                    datasets: [
+                        {
+                            label: 'CPU Usage',
+                            data: [],
+                            borderColor: 'rgb(75, 192, 192)',
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Memory Usage',
+                            data: [],
+                            borderColor: 'rgb(255, 99, 132)',
+                            tension: 0.1
+                        },
+                        {
+                            label: 'Disk Usage',
+                            data: [],
+                            borderColor: 'rgb(54, 162, 235)',
+                            tension: 0.1
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        y: {
+                            beginAtZero: true,
+                            max: 100
+                        }
+                    }
+                }
+            });
+
+            serverCharts.set(serverId, {
+                chart: chart,
+                elements: {
+                    cpuUsage: container.querySelector(`[data-server-id="${serverId}"] .cpu-usage`),
+                    memoryUsage: container.querySelector(`[data-server-id="${serverId}"] .memory-usage`),
+                    diskUsage: container.querySelector(`[data-server-id="${serverId}"] .disk-usage`)
+                }
+            });
+
+            // Update with initial metrics if available
+            if (serverInfo.last_metrics) {
+                console.log('Updating with initial metrics:', serverInfo.last_metrics);
+                updateServerMetrics(serverId, { 
+                    metrics: serverInfo.last_metrics,
+                    timestamp: new Date().toISOString()
+                });
+            }
+        }
+
+        function updateServerMetrics(serverId, data) {
+            console.log('Updating metrics for server:', serverId, data);
+            const serverInfo = serverCharts.get(serverId);
+            if (!serverInfo) {
+                console.warn('No server info found for:', serverId);
+                return;
+            }
+
+            const metrics = data.metrics;
+            const timestamp = new Date(data.timestamp).toLocaleTimeString();
+
+            try {
+                // Update metric values with one decimal place
+                serverInfo.elements.cpuUsage.textContent = `${metrics.cpu.toFixed(1)}%`;
+                serverInfo.elements.memoryUsage.textContent = `${metrics.memory.toFixed(1)}%`;
+                serverInfo.elements.diskUsage.textContent = `${metrics.disk.toFixed(1)}%`;
+
+                // Update color classes
+                serverInfo.elements.cpuUsage.className = `metric-value ${getColorClass(metrics.cpu)}`;
+                serverInfo.elements.memoryUsage.className = `metric-value ${getColorClass(metrics.memory)}`;
+                serverInfo.elements.diskUsage.className = `metric-value ${getColorClass(metrics.disk)}`;
+
+                // Update chart
+                const chart = serverInfo.chart;
+                chart.data.labels.push(timestamp);
+                chart.data.datasets[0].data.push(metrics.cpu);
+                chart.data.datasets[1].data.push(metrics.memory);
+                chart.data.datasets[2].data.push(metrics.disk);
+
+                // Keep only last 20 data points
+                if (chart.data.labels.length > 20) {
+                    chart.data.labels.shift();
+                    chart.data.datasets.forEach(dataset => dataset.data.shift());
+                }
+
+                chart.update();
+            } catch (error) {
+                console.error('Error updating metrics:', error);
+                showError(`Error updating metrics for ${serverId}: ${error.message}`);
+            }
+        }
+
+        async function fetchMetrics() {
+            try {
+                console.log('Fetching servers...');
+                const serversResponse = await fetch('/servers');
+                if (!serversResponse.ok) {
+                    throw new Error(`HTTP error! status: ${serversResponse.status}`);
+                }
+                const servers = await serversResponse.json();
+                console.log('Received servers:', servers);
+
+                // Create sections for new servers
+                Object.entries(servers).forEach(([serverId, serverInfo]) => {
+                    createServerSection(serverId, serverInfo);
+                });
+
+                // Remove sections for servers that no longer exist
+                const currentServerIds = new Set(Object.keys(servers));
+                serverCharts.forEach((info, serverId) => {
+                    if (!currentServerIds.has(serverId)) {
+                        destroyChart(serverId);
+                        serverCharts.delete(serverId);
+                        const section = document.querySelector(`[data-server-id="${serverId}"]`);
+                        if (section) section.remove();
+                    }
+                });
+
+                // Fetch metrics for each server
+                for (const [serverId, serverInfo] of Object.entries(servers)) {
+                    console.log('Fetching metrics for server:', serverId);
+                    try {
+                        const metricsResponse = await fetch(`/metrics/${serverId}`);
+                        if (!metricsResponse.ok) {
+                            throw new Error(`HTTP error! status: ${metricsResponse.status}`);
+                        }
+                        const metricsArray = await metricsResponse.json();
+                        console.log('Received metrics for server:', serverId, metricsArray);
+
+                        if (metricsArray && metricsArray.length > 0) {
+                            const latestMetrics = metricsArray[metricsArray.length - 1];
+                            updateServerMetrics(serverId, latestMetrics);
+                        }
+                    } catch (error) {
+                        console.error(`Error fetching metrics for server ${serverId}:`, error);
+                        showError(`Error fetching metrics for ${serverId}: ${error.message}`);
+                    }
+                }
+            } catch (error) {
+                console.error('Error fetching servers:', error);
+                showError(`Error fetching servers: ${error.message}`);
+            }
+        }
+
+        // Update metrics every 5 seconds
+        const updateInterval = setInterval(fetchMetrics, 5000);
+        // Initial fetch
+        fetchMetrics();
+
+        // Cleanup on page unload
+        window.addEventListener('beforeunload', () => {
+            clearInterval(updateInterval);
+            serverCharts.forEach((info, serverId) => destroyChart(serverId));
+        });
+    </script>
+</body>
+</html> 

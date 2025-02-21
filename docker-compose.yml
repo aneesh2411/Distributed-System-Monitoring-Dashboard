@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  dashboard:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "5000:5000"
+    environment:
+      - FLASK_ENV=development
+    volumes:
+      - .:/app
+    networks:
+      - monitoring_network
+
+  production_server:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    environment:
+      - DASHBOARD_URL=http://dashboard:5000
+      - SERVER_NAME=Production-Server-1
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT}
+    depends_on:
+      - dashboard
+    volumes:
+      - /proc:/host/proc:ro  # For accurate system metrics
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - monitoring_network
+
+  development_server:
+    build:
+      context: .
+      dockerfile: Dockerfile.agent
+    environment:
+      - DASHBOARD_URL=http://dashboard:5000
+      - SERVER_NAME=Development-Server-1
+      - EMAIL_USER=${EMAIL_USER}
+      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
+      - SMTP_SERVER=${SMTP_SERVER}
+      - SMTP_PORT=${SMTP_PORT}
+    depends_on:
+      - dashboard
+    volumes:
+      - /proc:/host/proc:ro  # For accurate system metrics
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    networks:
+      - monitoring_network
+
+networks:
+  monitoring_network:
+    driver: bridge 
