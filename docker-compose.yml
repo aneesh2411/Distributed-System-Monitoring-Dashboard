@@ -2,6 +2,7 @@ version: '3.8'
 
 services:
   dashboard:
+    container_name: system-monitoring-dashboard-1
     build: 
       context: .
       dockerfile: Dockerfile
@@ -9,51 +10,114 @@ services:
       - "5000:5000"
     environment:
       - FLASK_ENV=development
+      - REDIS_HOST=redis
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/monitoring
+    depends_on:
+      - db
+      - redis
     volumes:
       - .:/app
     networks:
       - monitoring_network
 
+  prometheus:
+    container_name: system-monitoring-prometheus-1
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus:/etc/prometheus
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    networks:
+      - monitoring_network
+
+  grafana:
+    container_name: system-monitoring-grafana-1
+    image: grafana/grafana:latest
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_USERS_ALLOW_SIGN_UP=false
+    depends_on:
+      - prometheus
+    networks:
+      - monitoring_network
+
+  db:
+    container_name: system-monitoring-db-1
+    image: postgres:13
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=monitoring
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - monitoring_network
+
+  redis:
+    container_name: system-monitoring-redis-1
+    image: redis:6-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - monitoring_network
+
   production_server:
+    container_name: system-monitoring-production-server-1
     build:
       context: .
       dockerfile: Dockerfile.agent
+    ports:
+      - "5001:5000"
     environment:
-      - DASHBOARD_URL=http://dashboard:5000
+      - FLASK_APP=agents.app:app
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - PYTHONUNBUFFERED=1
       - SERVER_NAME=Production-Server-1
-      - EMAIL_USER=${EMAIL_USER}
-      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
-      - SMTP_SERVER=${SMTP_SERVER}
-      - SMTP_PORT=${SMTP_PORT}
-    depends_on:
-      - dashboard
     volumes:
-      - /proc:/host/proc:ro  # For accurate system metrics
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
+      - .:/app
     networks:
       - monitoring_network
 
   development_server:
+    container_name: system-monitoring-development-server-1
     build:
       context: .
       dockerfile: Dockerfile.agent
+    ports:
+      - "5002:5000"
     environment:
-      - DASHBOARD_URL=http://dashboard:5000
+      - FLASK_APP=agents.app:app
+      - FLASK_ENV=development
+      - FLASK_DEBUG=1
+      - PYTHONUNBUFFERED=1
       - SERVER_NAME=Development-Server-1
-      - EMAIL_USER=${EMAIL_USER}
-      - EMAIL_PASSWORD=${EMAIL_PASSWORD}
-      - SMTP_SERVER=${SMTP_SERVER}
-      - SMTP_PORT=${SMTP_PORT}
-    depends_on:
-      - dashboard
     volumes:
-      - /proc:/host/proc:ro  # For accurate system metrics
-      - /sys:/host/sys:ro
-      - /:/rootfs:ro
+      - .:/app
     networks:
       - monitoring_network
 
 networks:
   monitoring_network:
-    driver: bridge 
+    name: system-monitoring-network
+    driver: bridge
+
+volumes:
+  postgres_data:
+  redis_data:
+  prometheus_data:
+  grafana_data: 
